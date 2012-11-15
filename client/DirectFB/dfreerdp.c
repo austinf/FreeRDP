@@ -64,6 +64,8 @@ void df_end_paint(rdpContext* context)
 {
 	rdpGdi* gdi;
 	dfInfo* dfi;
+	void* pData;
+	int stride;
 
 	gdi = context->gdi;
 	dfi = ((dfContext*) context)->dfi;
@@ -83,7 +85,27 @@ void df_end_paint(rdpContext* context)
 	dfi->update_rect.h = gdi->height;
 #endif
 
-	dfi->primary->Blit(dfi->primary, dfi->surface, &(dfi->update_rect), dfi->update_rect.x, dfi->update_rect.y);
+	if( dfi->surface->Lock(dfi->surface, DSLF_WRITE | DSLF_READ, &pData, &stride) == DFB_OK ) {
+	    int y = 0;
+	    uint32_t src_stride = dfi->update_rect.w * gdi->bytesPerPixel;
+	    uint32_t dst_stride = stride;
+	    uint8_t* src_pos = gdi->primary_buffer + (src_stride * dfi->update_rect.y) + (dfi->update_rect.x * gdi->bytesPerPixel);
+	    uint8_t* dst_pos = ((uint8_t*)pData) + (dst_stride * dfi->update_rect.y) + (dfi->update_rect.x * gdi->bytesPerPixel);
+	    int row_bytes = dfi->update_rect.w * gdi->bytesPerPixel;
+
+	    for ( ; y<dfi->update_rect.h; y++ ) {
+
+		memcpy( dst_pos, src_pos, row_bytes );
+
+		dst_pos += dst_stride;
+		src_pos += src_stride;
+	    }
+
+	    dfi->surface->Unlock(dfi->surface);
+
+	    dfi->primary->Blit(dfi->primary, dfi->surface, &(dfi->update_rect), dfi->update_rect.x, dfi->update_rect.y);
+	    dfi->primary->Flip(dfi->primary, 0, 0);
+	}
 }
 
 BOOL df_get_fds(freerdp* instance, void** rfds, int* rcount, void** wfds, int* wcount)
@@ -190,7 +212,7 @@ BOOL df_post_connect(freerdp* instance)
 	dfi->dfb->GetDisplayLayer(dfi->dfb, 0, &(dfi->layer));
 	dfi->layer->EnableCursor(dfi->layer, 1);
 
-	dfi->dsc.flags = DSDESC_CAPS | DSDESC_WIDTH | DSDESC_HEIGHT | DSDESC_PREALLOCATED | DSDESC_PIXELFORMAT;
+	dfi->dsc.flags = DSDESC_CAPS | DSDESC_WIDTH | DSDESC_HEIGHT | DSDESC_PIXELFORMAT;
 	dfi->dsc.caps = DSCAPS_SYSTEMONLY;
 	dfi->dsc.width = gdi->width;
 	dfi->dsc.height = gdi->height;
@@ -204,8 +226,6 @@ BOOL df_post_connect(freerdp* instance)
 	else
 		dfi->dsc.pixelformat = DSPF_AiRGB;
 
-	dfi->dsc.preallocated[0].data = gdi->primary_buffer;
-	dfi->dsc.preallocated[0].pitch = gdi->width * gdi->bytesPerPixel;
 	dfi->dfb->CreateSurface(dfi->dfb, &(dfi->dsc), &(dfi->surface));
 
 	instance->update->BeginPaint = df_begin_paint;
